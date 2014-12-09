@@ -45,7 +45,9 @@ end
 
 local cache = cachel:new(cache_dir)
 
-local m = ngx.re.match(ngx.var.uri, "/"..resource.."(.*)")
+local pattern = "/"..resource.."(.*)"
+if resource == "misc" then pattern = "(.*)" end
+local m = ngx.re.match(ngx.var.uri, pattern)
 local path = nil
 local bucket_name = nil
 local object_name = nil
@@ -60,7 +62,7 @@ if path and path ~= "/" and path ~= "" then
             bucket_name, object_name = m["obj_bct"], m["obj"]
         end
     else
-        ngx.log(ngx.ERR, "invalid uri")
+        ngx.log(ngx.ERR, "invalid uri: ", err)
         ngx.exit(404)
     end
 end
