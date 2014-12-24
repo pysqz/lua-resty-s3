@@ -17,6 +17,8 @@ Dependencies
 
 [lua-resty-uuid](https://github.com/bungle/lua-resty-uuid.git)
 
+[magick](https://github.com/gooo000/magick.git)
+
 Installation
 ======
 

@@ -20,6 +20,9 @@ local read_timeout = ngx.var.read_timeout or 3600
 
 local with_sign = ngx.var.with_sign or false
 
+local rename_object = ngx.var.rename_object or ""
+local thumbnail = ngx.var.thumbnail or "" 
+
 local conn = mongol:new()
 local ok, err = conn:connect(db_host, db_port)
 if not ok then
@@ -79,7 +82,9 @@ local _h = handler:new({
     db = db,
     cache = cache,
     chunk_size = chunk_size,
-    read_timeout = read_timeout
+    read_timeout = read_timeout,
+    rename_object = rename_object,
+    thumbnail = thumbnail,
 })
 
 

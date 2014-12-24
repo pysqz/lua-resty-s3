@@ -1,7 +1,9 @@
 local mod_name = "resty.s3."
 
-local upload = require "resty.upload"
 local cjson = require "cjson"
+local upload = require "resty.upload"
+local uuid = require "resty.uuid"
+local md5 = require "resty.md5"
 local bucket = require (mod_name.."bucket")
 local object = require (mod_name.."object")
 
@@ -22,7 +24,9 @@ function _M:new(ctx)
         db = ctx["db"],
         cache = ctx["cache"],
         chunk_size = ctx["chunk_size"],
-        read_timeout = ctx["read_timeout"]
+        read_timeout = ctx["read_timeout"],
+        rename_object = ctx["rename_object"],
+        thumbnail = ctx["thumbnail"],
     }, mt)                            
 end 
 
@@ -131,6 +135,140 @@ function _M:put_bucket(bucket_name)
     end
 end
 
+local function put_object_without_thumb(self, form, obj, name)
+    local fname = name
+    local offset = 0
+    local f, err
+    
+    while true do
+        local typ, res, err = form:read()
+        if not typ then
+            self.ngx_log(self.ngx_err_flag, "failed to read: ", err)
+            self.ngx_exit(500)
+            return
+        end
+        if typ == "header" then
+            if res[1] ~= "Content-Type" then
+                if self.rename_object == "uuid" then
+                    fname = uuid.generate()
+                end
+                m = ngx.re.match(res[2],'(.*)filename="(.*?)\\.(.*)"(.*)')
+                if m and self.rename_object == "uuid" then
+                    fname = fname.."."..m[3]
+                end
+                f = obj.bucket:find_one({["filename"]=fname})
+                if f then
+                    f["_md5"] = md5:new()
+                    f["file_size"] = 0
+                    f["file_md5"] = 0
+                else 
+                    f, err = obj:put(fname)
+                    if not f then
+                        self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
+                        self.ngx_exit(500)
+                        return
+                    end
+                end 
+            end
+        end
+        if typ == "body" then
+            local res_len = string.len(res)
+            n, err = f:write(res, offset, res_len)
+            if not n then
+                self.ngx_log(self.ngx_err_flag, "failed to write to mongodb: ", err)
+                self.ngx_exit(500)
+                return
+            end
+            offset = offset + res_len
+        end
+        if typ == "eof" then
+            f:update_md5()
+            break
+        end
+    end
+    return fname
+end
+
+local function put_object_with_thumb(self, form, obj, name, thumb)
+    local fname = name
+    local offset = 0
+    local blob = ""
+    local f, err
+    
+    while true do
+        local typ, res, err = form:read()
+        if not typ then
+            self.ngx_log(self.ngx_err_flag, "failed to read: ", err)
+            self.ngx_exit(500)
+            return
+        end
+        if typ == "header" then
+            if res[1] ~= "Content-Type" then
+                if self.rename_object == "uuid" then
+                    fname = uuid.generate()
+                end
+                m = ngx.re.match(res[2],'(.*)filename="(.*?)\\.(.*)"(.*)')
+                if m and self.rename_object == "uuid" then
+                    fname = fname.."."..m[3]
+                end
+                f = obj.bucket:find_one({["filename"]=fname})
+                if f then
+                    f["_md5"] = md5:new()
+                    f["file_size"] = 0
+                    f["file_md5"] = 0
+                else 
+                    f, err = obj:put(fname)
+                    if not f then
+                        self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
+                        self.ngx_exit(500)
+                        return
+                    end
+                end 
+            end
+        end
+        if typ == "body" then
+            blob = blob..res	
+        end
+        if typ == "eof" then
+            break
+        end
+    end
+ 
+    local image = require(mod_name.."image")
+    local r, err = image.thumb(blob, thumb)
+    if not r then
+        self.ngx_say(cjson.encode({errno=20001, error="failed to generate thumbnail: "..err}))
+        self.ngx_exit(200)
+        return
+    end
+ 
+    f:write(r[1], 0)
+    f:update_md5()
+   
+    f, err = obj:put("thumbnail_"..fname)
+    if not f then
+        self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
+        self.ngx_exit(500)
+        return
+    end
+    f:write(r[2], 0)
+    f:update_md5() 
+   
+    return fname
+end
+
+local function delete_cache(self, key_str)
+    local key = self.cache:gen_key(key_str)
+    if not key then
+        self.ngx_log(self.ngx_err_flag, "failed to generate cache key")
+    else
+        local r, err = self.cache:delete(key)
+        if not r then
+            self.ngx_log(self.ngx_err_flag, "failed to delete cache: ", err)
+        end
+    end
+end
+
 function _M:put_object(bucket_name, object_name)
     local form, err = upload:new(self.chunk_size)
     if not form then
@@ -141,44 +279,24 @@ function _M:put_object(bucket_name, object_name)
     form:set_timeout(self.read_timeout)
 
     local o = object:new(self.db, bucket_name)
-    local f, err = o:put(object_name)
-    if not f then
-        ngx.log(self.ngx_err_flag, "failed to put object: ", err)
-        self.ngx_exit(500)
-        return
-    end
-    local offset = 0
-    while true do
-        local typ, res, err = form:read()
-        if not typ then
-            ngx.log(self.ngx_err_flag, "failed to read: ", err)
-            self.ngx_exit(500)
-            return
-        end
-        if typ == "body" then
-            local res_len = string.len(res)
-            n, err = f:write(res, offset, res_len)
-            if not n then
-                ngx.log(self.ngx_err_flag, "failed to write to mongodb: ", err)
-                self.ngx_exit(500)
-                return
-            end
-            offset = offset + res_len
-        end
-    
-        if typ == "eof" then
-            f:update_md5()
-            break
-        end
+    local fname = object_name
+
+    if self.thumbnail == "" then
+    	fname = put_object_without_thumb(self, form, o, fname)
+    else
+        fname = put_object_with_thumb(self, form, o, fname, self.thumbnail)
     end
 
-    local key = self.cache:gen_key(bucket_name..object_name)
-    if not key then
-        self.ngx_log(self.ngx_err_flag, "failed to generate cache key")
-    else
-        local r, err = self.cache:delete(key)
-        if not r then
-            self.ngx_log(self.ngx_err_flag, "failed to delete cache: ", err)
+    delete_cache(self, bucket_name..fname)
+    if self.thumbnial ~= "" then
+        delete_cache(self, bucket_name.."thumbnail_"..fname)
+    end
+       
+    if self.rename_object ~= "" then
+        if self.thumbnail ~= "" then
+            self.ngx_say(cjson.encode({errno=10000, data={url={"/"..bucket_name.."/"..fname, "/"..bucket_name.."/thumbnail_"..fname}}}))
+        else
+            self.ngx_say(cjson.encode({errno=10000, data={url="/"..bucket_name.."/"..fname}}))
         end
     end
 end
