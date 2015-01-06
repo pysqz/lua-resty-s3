@@ -13,6 +13,7 @@ mt = { __index = _M}
 
 function _M:new(ctx)
     return setmetatable({
+        main_domain = ctx["main_domain"],
         document_uri = ctx["document_uri"],
         uri_args = ctx["uri_args"],
         ngx_say = ctx["ngx_say"],
@@ -294,10 +295,20 @@ function _M:put_object(bucket_name, object_name)
        
     if self.rename_object ~= "" then
         if self.thumbnail ~= "" then
-            self.ngx_say(cjson.encode({errno=10000, data={url={"/"..bucket_name.."/"..fname, "/"..bucket_name.."/thumbnail_"..fname}}}))
+            self.ngx_say(cjson.encode({errno=10000, data={url={self.main_domain..bucket_name.."/"..fname, self.main_domain..bucket_name.."/thumbnail_"..fname}}}))
         else
-            self.ngx_say(cjson.encode({errno=10000, data={url="/"..bucket_name.."/"..fname}}))
+            self.ngx_say(cjson.encode({errno=10000, data={url=self.main_domain..bucket_name.."/"..fname}}))
         end
+    end
+end
+
+function _M:head_object(bucket_name, object_name)
+    local o = object:new(self.db, bucket_name)
+    local r = o:head(object_name)
+    if not r then
+        return 0
+    else
+        return r["length"]
     end
 end
 

@@ -31,4 +31,8 @@ function _M:delete(object_name)
     return self.bucket:remove({["filename"]=object_name}, 0, 1) 
 end
 
+function _M:head(object_name)
+    return self.bucket.file_col:find_one({filename=object_name}, {_id=0})
+end
+
 return _M

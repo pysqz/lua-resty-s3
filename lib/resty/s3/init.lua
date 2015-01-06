@@ -23,6 +23,8 @@ local with_sign = ngx.var.with_sign or false
 local rename_object = ngx.var.rename_object or ""
 local thumbnail = ngx.var.thumbnail or "" 
 
+local main_domain = "http://static.scloud.letv.com/"
+
 local conn = mongol:new()
 local ok, err = conn:connect(db_host, db_port)
 if not ok then
@@ -71,6 +73,7 @@ if path and path ~= "/" and path ~= "" then
 end
 
 local _h = handler:new({
+    main_domain = main_domain,
     document_uri = ngx.var.document_uri,
     uri_args = ngx.req.get_uri_args(),
     ngx_say = ngx.say,
@@ -121,11 +124,17 @@ if method == "PUT" then
 end
 
 if method == "DELETE" then
-   if bucket_name and object_name then
-       _h:delete_object(bucket_name, object_name)
-   elseif bucket_name then
-       _h:delete_bucket(bucket_name)
-   else
-       ngx.exit(405)
-   end
+    if bucket_name and object_name then
+        _h:delete_object(bucket_name, object_name)
+    elseif bucket_name then
+        _h:delete_bucket(bucket_name)
+    else
+        ngx.exit(405)
+    end
+end
+
+if method == "HEAD" then
+    if bucket_name and object_name then
+        ngx.header["Content-Length"] = _h:head_object(bucket_name, object_name)
+    end
 end
