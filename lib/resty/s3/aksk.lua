@@ -55,7 +55,6 @@ if method == "POST" or method == "PUT" then
             local m = ngx.re.match(k, "{\"sso_token\":\"(.*)\"}")
             if m then
                 local token = m[1]
-                local sk = uuid:generate()
                 local _md5 = md5:new()
                 _md5:update(token)
                 local ak = string.to_hex(_md5:final())
