@@ -295,7 +295,7 @@ function _M:put_object(bucket_name, object_name)
        
     if self.rename_object ~= "" then
         if self.thumbnail ~= "" then
-            self.ngx_say(cjson.encode({errno=10000, data={url={self.main_domain..bucket_name.."/"..fname, self.main_domain..bucket_name.."/thumbnail_"..fname}}}))
+            self.ngx_say(cjson.encode({errno=10000, data={url=self.main_domain..bucket_name.."/"..fname, thumb=self.main_domain..bucket_name.."/thumbnail_"..fname}}))
         else
             self.ngx_say(cjson.encode({errno=10000, data={url=self.main_domain..bucket_name.."/"..fname}}))
         end

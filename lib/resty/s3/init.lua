@@ -7,8 +7,7 @@ local cachel = require (mod_name.."cachel")
 
 local resource = ngx.var.resource or "misc"
 
-local db_host = ngx.var.db_host or "127.0.0.1"
-local db_port = ngx.var.db_port or 27017
+local db_addrs = ngx.var.db_addrs or "127.0.0.1:27017"
 local db_name = ngx.var.db_name or resource
 local db_user = ngx.var.db_user or ""
 local db_passwd = ngx.var.db_passwd or ""
@@ -16,7 +15,7 @@ local db_passwd = ngx.var.db_passwd or ""
 local cache_dir = ngx.var.cache_dir or "/tmp/nginx_cache/"
 
 local chunk_size = ngx.var.chunk_size or 4096
-local read_timeout = ngx.var.read_timeout or 3600
+local read_timeout = ngx.var.read_timeout or 600000
 
 local with_sign = ngx.var.with_sign or false
 
@@ -25,13 +24,35 @@ local thumbnail = ngx.var.thumbnail or ""
 
 local main_domain = "http://static.scloud.letv.com/"
 
-local conn = mongol:new()
-local ok, err = conn:connect(db_host, db_port)
+local db_list = {}
+local db_host, db_port = "", 0
+local db_addrs_len = string.len(db_addrs)
+local pos_start = 1
+while pos_start < db_addrs_len do
+    local pos_end = string.find(db_addrs, ",", pos_start)
+    if not pos_end then
+        pos_end = string.len(db_addrs)+1
+    end
+    local addr = string.sub(db_addrs, pos_start, pos_end-1)
+    table.insert(db_list, addr)
+    pos_start = pos_end + 1 	
+    
+    if db_host == "" then
+        local m = ngx.re.match(addr, "(.*):(.*)")
+        if m then
+            db_host, db_port = m[1], m[2]
+        end 
+    end
+end
+
+local base_conn = mongol:new()
+local ok, err = base_conn:connect(db_host, tonumber(db_port))
 if not ok then
     ngx.log(ngx.ERR, "failed to connect db: ", err)
     ngx.exit(500)
 end
 
+local conn = base_conn:getprimary(db_list)
 local ok, err = conn:new_db_handle("admin"):auth(db_user, db_passwd)
 if not ok then
     ngx.log(ngx.ERR, "failed to auth db: ", err)
