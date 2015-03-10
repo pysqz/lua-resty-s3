@@ -10,8 +10,7 @@ thumb = function(blob, size)
     if not size then
         return nil, "no thumbnail size"
     end 
-    
-    local src_img = src:clone():get_blob()
+   
     local src_w, src_h = src:get_width(), src:get_height() 
     local opts = magick.parse_size_str(size, src_w, src_h)
     if not opts then
@@ -31,7 +30,7 @@ thumb = function(blob, size)
     if r ~= 0 then
         return nil, err
     else
-        return {src_img, dst_img}
+        return dst_img
     end
 end
 

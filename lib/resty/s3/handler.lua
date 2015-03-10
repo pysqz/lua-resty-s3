@@ -66,7 +66,7 @@ function _M:list_object(bucket_name)
 end
 
 function _M:get_object(bucket_name, object_name)
-    local key = self.cache:gen_key(bucket_name..object_name)
+    --[[local key = self.cache:gen_key(bucket_name..object_name)
     if not key then
         self.ngx_log(self.ngx_err_flag, "failed to generate cache key")
     else    
@@ -74,10 +74,11 @@ function _M:get_object(bucket_name, object_name)
         if not r then
             self.ngx_log(self.ngx_err_flag, "failed to get cache: ", err)
         else
+            ngx.header["Content-Length"] = string.len(r)
             self.ngx_print(r)
             return
         end
-    end
+    end]]
      
     local o = object:new(self.db, bucket_name)
     local r, err = o:get(object_name)
@@ -87,13 +88,14 @@ function _M:get_object(bucket_name, object_name)
         return
     end
     
-    if key then
+    --[[if key then
         local r, err = self.cache:set(key, r)
         if not r then
             self.ngx_log(self.ngx_err_flag, "failed to set cache: ", err)
         end
-    end
+    end]]
     
+    ngx.header["Content-Length"] = string.len(r)
     self.ngx_print(r)
 end
 
@@ -136,10 +138,11 @@ function _M:put_bucket(bucket_name)
     end
 end
 
-local function put_object_without_thumb(self, form, obj, name)
+local function put_object_with_thumb(self, form, obj, name, thumb)
     local fname = name
     local offset = 0
     local f, err
+    local blob = ""
     
     while true do
         local typ, res, err = form:read()
@@ -181,80 +184,34 @@ local function put_object_without_thumb(self, form, obj, name)
                 return
             end
             offset = offset + res_len
+            blob = blob..res	
         end
         if typ == "eof" then
             f:update_md5()
             break
         end
     end
-    return fname
-end
 
-local function put_object_with_thumb(self, form, obj, name, thumb)
-    local fname = name
-    local offset = 0
-    local blob = ""
-    local f, err
-    
-    while true do
-        local typ, res, err = form:read()
-        if not typ then
-            self.ngx_log(self.ngx_err_flag, "failed to read: ", err)
+    if thumb ~= "" then
+        local image = require(mod_name.."image")
+        local r, err = image.thumb(blob, thumb)
+        if not r then
+            self.ngx_say(cjson.encode({errno=20001, error="failed to generate thumbnail: "..err}))
+            self.ngx_exit(200)
+            return
+        end
+       
+        f, err = obj:put("thumbnail_"..fname)
+        if not f then
+            self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
             self.ngx_exit(500)
             return
         end
-        if typ == "header" then
-            if res[1] ~= "Content-Type" then
-                if self.rename_object == "uuid" then
-                    fname = uuid.generate()
-                end
-                m = ngx.re.match(res[2],'(.*)filename="(.*?)\\.(.*)"(.*)')
-                if m and self.rename_object == "uuid" then
-                    fname = fname.."."..m[3]
-                end
-                f = obj.bucket:find_one({["filename"]=fname})
-                if f then
-                    f["_md5"] = md5:new()
-                    f["file_size"] = 0
-                    f["file_md5"] = 0
-                else 
-                    f, err = obj:put(fname)
-                    if not f then
-                        self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
-                        self.ngx_exit(500)
-                        return
-                    end
-                end 
-            end
-        end
-        if typ == "body" then
-            blob = blob..res	
-        end
-        if typ == "eof" then
-            break
-        end
+        
+        f:write(r, 0)
+        f:update_md5()
     end
- 
-    local image = require(mod_name.."image")
-    local r, err = image.thumb(blob, thumb)
-    if not r then
-        self.ngx_say(cjson.encode({errno=20001, error="failed to generate thumbnail: "..err}))
-        self.ngx_exit(200)
-        return
-    end
- 
-    f:write(r[1], 0)
-    f:update_md5()
-   
-    f, err = obj:put("thumbnail_"..fname)
-    if not f then
-        self.ngx_log(self.ngx_err_flag, "failed to put object: ", err)
-        self.ngx_exit(500)
-        return
-    end
-    f:write(r[2], 0)
-    f:update_md5() 
-   
+
     return fname
 end
 
@@ -282,11 +239,7 @@ function _M:put_object(bucket_name, object_name)
     local o = object:new(self.db, bucket_name)
     local fname = object_name
 
-    if self.thumbnail == "" then
-    	fname = put_object_without_thumb(self, form, o, fname)
-    else
-        fname = put_object_with_thumb(self, form, o, fname, self.thumbnail)
-    end
+    fname = put_object_with_thumb(self, form, o, fname, self.thumbnail)
 
     delete_cache(self, bucket_name..fname)
     if self.thumbnial ~= "" then

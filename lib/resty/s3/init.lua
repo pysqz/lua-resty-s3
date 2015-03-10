@@ -14,7 +14,7 @@ local db_passwd = ngx.var.db_passwd or ""
 
 local cache_dir = ngx.var.cache_dir or "/tmp/nginx_cache/"
 
-local chunk_size = ngx.var.chunk_size or 4096
+local chunk_size = ngx.var.chunk_size or 204800
 local read_timeout = ngx.var.read_timeout or 600000
 
 local with_sign = ngx.var.with_sign or false
@@ -22,7 +22,7 @@ local with_sign = ngx.var.with_sign or false
 local rename_object = ngx.var.rename_object or ""
 local thumbnail = ngx.var.thumbnail or "" 
 
-local main_domain = "http://*.com"
+local main_domain = "http://*.com/"
 
 local db_list = {}
 local db_host, db_port = "", 0
