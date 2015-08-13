@@ -6,6 +6,7 @@ local uuid = require "resty.uuid"
 local md5 = require "resty.md5"
 local bucket = require (mod_name.."bucket")
 local object = require (mod_name.."object")
+local image = require(mod_name.."image")
 
 _M = {}                 
 mt = { __index = _M}                                   
@@ -28,6 +29,8 @@ function _M:new(ctx)
         read_timeout = ctx["read_timeout"],
         rename_object = ctx["rename_object"],
         thumbnail = ctx["thumbnail"],
+        noise = ctx["noise"],
+        noise_pwd = ctx["noise_pwd"],
     }, mt)                            
 end 
 
@@ -66,19 +69,6 @@ function _M:list_object(bucket_name)
 end
 
 function _M:get_object(bucket_name, object_name)
-    --[[local key = self.cache:gen_key(bucket_name..object_name)
-    if not key then
-        self.ngx_log(self.ngx_err_flag, "failed to generate cache key")
-    else    
-        local r, err = self.cache:get(key)
-        if not r then
-            self.ngx_log(self.ngx_err_flag, "failed to get cache: ", err)
-        else
-            ngx.header["Content-Length"] = string.len(r)
-            self.ngx_print(r)
-            return
-        end
-    end]]
      
     local o = object:new(self.db, bucket_name)
     local r, err = o:get(object_name)
@@ -87,13 +77,6 @@ function _M:get_object(bucket_name, object_name)
         self.ngx_exit(404)
         return
     end
-    
-    --[[if key then
-        local r, err = self.cache:set(key, r)
-        if not r then
-            self.ngx_log(self.ngx_err_flag, "failed to set cache: ", err)
-        end
-    end]]
     
     ngx.header["Content-Length"] = string.len(r)
     self.ngx_print(r)
@@ -138,7 +121,10 @@ function _M:put_bucket(bucket_name)
     end
 end
 
-local function put_object_with_thumb(self, form, obj, name, thumb)
+local function put_object_with_opts(self, form, obj, name, opts)
+    local thumb = opts["thumb"]
+    local noise = opts["noise"]
+    local noise_pwd = opts["noise_pwd"]
     local fname = name
     local offset = 0
     local f, err
@@ -176,24 +162,26 @@ local function put_object_with_thumb(self, form, obj, name, thumb)
             end
         end
         if typ == "body" then
-            local res_len = string.len(res)
-            n, err = f:write(res, offset, res_len)
-            if not n then
-                self.ngx_log(self.ngx_err_flag, "failed to write to mongodb: ", err)
-                self.ngx_exit(500)
-                return
-            end
-            offset = offset + res_len
             blob = blob..res	
         end
         if typ == "eof" then
-            f:update_md5()
             break
         end
     end
 
+    if noise == "1" then
+        local r, err = image.noise(blob, noise_pwd)
+        if err ~= nil then
+            self.ngx_log(self.ngx_err_flag, "failed to noise image: ", err)
+            self.ngx_exit(500)
+            return
+        end
+        blob = r
+    end
+    f:write(blob, 0)
+    f:update_md5()
+
     if thumb ~= "" then
-        local image = require(mod_name.."image")
         local r, err = image.thumb(blob, thumb)
         if not r then
             self.ngx_say(cjson.encode({errno=20001, error="failed to generate thumbnail: "..err}))
@@ -207,7 +195,15 @@ local function put_object_with_thumb(self, form, obj, name, thumb)
             self.ngx_exit(500)
             return
         end
-        
+        if noise == "1" then
+            local ni, err = image.noise(blob, noise_pwd)
+            if err ~= nil then
+                self.ngx_log(self.ngx_err_flag, "failed to noise image: ", err)
+                self.ngx_exit(500)
+                return
+            end
+            r = ni
+        end
         f:write(r, 0)
         f:update_md5()
     end
@@ -239,7 +235,8 @@ function _M:put_object(bucket_name, object_name)
     local o = object:new(self.db, bucket_name)
     local fname = object_name
 
-    fname = put_object_with_thumb(self, form, o, fname, self.thumbnail)
+    local opts = {thumb = self.thumbnail, noise = self.noise, noise_pwd = self.noise_pwd}
+    fname = put_object_with_opts(self, form, o, fname, opts)
 
     delete_cache(self, bucket_name..fname)
     if self.thumbnial ~= "" then

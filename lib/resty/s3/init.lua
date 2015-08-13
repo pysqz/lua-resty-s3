@@ -21,6 +21,10 @@ local with_sign = ngx.var.with_sign or false
 
 local rename_object = ngx.var.rename_object or ""
 local thumbnail = ngx.var.thumbnail or "" 
+local noise = ngx.var.noise or "" 
+local noise_pwd = ngx.var.noise_pwd or "*" 
+
+local forbidden = tonumber(ngx.var.forbidden) or 0
 
 local main_domain = "http://*.com/"
 
@@ -109,6 +113,8 @@ local _h = handler:new({
     read_timeout = read_timeout,
     rename_object = rename_object,
     thumbnail = thumbnail,
+    noise = noise,
+    noise_pwd = noise_pwd,
 })
 
 
@@ -120,10 +126,16 @@ end
 local method = ngx.var.request_method
 if method == "GET" then
     if not bucket_name then
+        if forbidden >= 1 then
+            ngx.exit(405)
+        end
         _h:list_bucket()
     elseif bucket_name and object_name then
         _h:get_object(bucket_name, object_name)
     else
+        if forbidden >= 1 then
+            ngx.exit(405)
+        end
         _h:list_object(bucket_name)
     end
 end

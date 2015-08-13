@@ -34,6 +34,12 @@ thumb = function(blob, size)
     end
 end
 
+local noise
+noise = function(blob, passwd)
+    --TODO
+end
+
 return {
-    thumb = thumb
+    thumb = thumb,
+    noise = noise
 }
